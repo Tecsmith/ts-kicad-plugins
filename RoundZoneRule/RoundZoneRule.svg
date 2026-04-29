@@ -3,12 +3,11 @@
 <!-- SPDX-License-Identifier: MIT -->
 <svg width="64px" height="64px" viewBox="0 0 64 64" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
   <defs>
-    <pattern id="thatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
-      <rect width="6" height="6" fill="none" />
-      <line x1="3" y1="0" x2="3" y2="6" stroke="#565656" stroke-width="2" />
+    <pattern id="thatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+      <line x1="4" y1="0" x2="4" y2="10" stroke="#565656" stroke-width="4" />
     </pattern>
   </defs>
-  <g stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-    <circle fill="url(#thatch)" stroke="#565656" cx="32" cy="32" r="27.5" />
+  <g stroke="none" stroke-width="2" fill="none" fill-rule="evenodd">
+    <circle fill="url(#thatch)" stroke="#565656" cx="32" cy="32" r="27" />
   </g>
 </svg>
