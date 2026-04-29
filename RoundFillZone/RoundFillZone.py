@@ -102,6 +102,37 @@ def _active_copper_layer(board) -> int:
     return pcbnew.F_Cu
 
 
+def _layer_sequence(layer_set):
+    if hasattr(layer_set, "Seq"):
+        try:
+            return list(layer_set.Seq())
+        except Exception:
+            pass
+
+    try:
+        return list(layer_set)
+    except Exception:
+        return []
+
+
+def _visible_layer_choices(board):
+    layers = []
+    visible_layers = getattr(board, "GetVisibleLayers", lambda: board.GetEnabledLayers())()
+
+    for layer in _layer_sequence(visible_layers):
+        if hasattr(board, "IsLayerVisible") and not board.IsLayerVisible(layer):
+            continue
+        if hasattr(board, "IsLayerEnabled") and not board.IsLayerEnabled(layer):
+            continue
+        layers.append((layer, str(board.GetLayerName(layer))))
+
+    if layers:
+        return layers
+
+    active_layer = getattr(board, "GetActiveLayer", lambda: pcbnew.F_Cu)()
+    return [(active_layer, str(board.GetLayerName(active_layer)))]
+
+
 def _grid_origin(board, frame=None):
     if frame is not None and hasattr(frame, "GetGridOrigin"):
         return _point_xy(frame.GetGridOrigin())
@@ -278,26 +309,44 @@ def _rebuild_zone_fills(board) -> None:
 
 
 class RoundFillZoneDialog(wx.Dialog):
-    def __init__(self, center_x: int, center_y: int, radius: int, unit: int, parent=None):
+    def __init__(
+        self,
+        center_x: int,
+        center_y: int,
+        radius: int,
+        unit: int,
+        layer_choices,
+        selected_layer: int,
+        parent=None,
+    ):
         super().__init__(parent, title="Round Fill Zone")
 
         self.unit = unit
+        self.layer_ids = [layer for layer, _name in layer_choices]
         unit_label = _unit_label(unit)
 
         main_sizer = wx.BoxSizer(wx.VERTICAL)
-        grid = wx.FlexGridSizer(4, 2, 8, 8)
+        grid = wx.FlexGridSizer(5, 2, 8, 8)
         grid.AddGrowableCol(1, 1)
 
         self.x_ctrl = wx.TextCtrl(self, value=_format_user_value(center_x, unit))
         self.y_ctrl = wx.TextCtrl(self, value=_format_user_value(center_y, unit))
         self.radius_ctrl = wx.TextCtrl(self, value=_format_user_value(radius, unit))
         self.points_ctrl = wx.SpinCtrl(self, min=3, max=128, initial=64)
+        self.layer_ctrl = wx.Choice(self, choices=[name for _layer, name in layer_choices])
+
+        try:
+            selected_index = self.layer_ids.index(selected_layer)
+        except ValueError:
+            selected_index = 0
+        self.layer_ctrl.SetSelection(selected_index)
 
         fields = (
             (f"Center X ({unit_label})", self.x_ctrl),
             (f"Center Y ({unit_label})", self.y_ctrl),
             (f"Radius ({unit_label})", self.radius_ctrl),
             ("Points", self.points_ctrl),
+            ("Layer", self.layer_ctrl),
         )
 
         for label, ctrl in fields:
@@ -313,9 +362,10 @@ class RoundFillZoneDialog(wx.Dialog):
         y = _from_user_units(float(self.y_ctrl.GetValue()), self.unit)
         radius = _from_user_units(float(self.radius_ctrl.GetValue()), self.unit)
         points = self.points_ctrl.GetValue()
+        layer = self.layer_ids[self.layer_ctrl.GetSelection()]
         if radius <= 0:
             raise ValueError("Radius must be greater than zero.")
-        return x, y, radius, points
+        return x, y, radius, points, layer
 
 
 class RoundFillZone(pcbnew.ActionPlugin):
@@ -338,10 +388,14 @@ class RoundFillZone(pcbnew.ActionPlugin):
 
         frame = _pcb_frame()
         unit = _board_units(board)
+        layer_choices = _visible_layer_choices(board)
+        active_layer = getattr(board, "GetActiveLayer", lambda: pcbnew.F_Cu)()
         dialog = RoundFillZoneDialog(
             *_default_center(board, frame),
             _default_radius(board) or _fallback_radius(unit),
             unit,
+            layer_choices,
+            active_layer,
             parent=frame,
         )
         try:
@@ -349,13 +403,13 @@ class RoundFillZone(pcbnew.ActionPlugin):
                 return
 
             try:
-                center_x, center_y, radius, points = dialog.get_values()
+                center_x, center_y, radius, points, layer = dialog.get_values()
             except ValueError as exc:
                 wx.MessageBox(str(exc), "Round Fill Zone", wx.OK | wx.ICON_ERROR)
                 return
 
             zone = pcbnew.ZONE(board)
-            zone.SetLayer(_active_copper_layer(board))
+            zone.SetLayer(layer)
 
             if hasattr(zone, "SetIsRuleArea"):
                 zone.SetIsRuleArea(False)
