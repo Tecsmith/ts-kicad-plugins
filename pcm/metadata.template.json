@@ -1,0 +1,23 @@
+{
+    "$schema": "https://go.kicad.org/pcm/schemas/v1",
+    "name": "ts-kicad-plugins",
+    "description": "KiCAD plugins",
+    "description_full": "KiCAD plugins as used by Tecsmith projects.",
+    "identifier": "com.github.tecsmith.ts-kicad-plugins",
+    "type": "plugin",
+    "author": {},
+    "maintainer": {},
+    "license": "MIT",
+    "resources": {
+        "homepage": "https://github.com/Tecsmith/ts-kicad-plugins"
+    },
+    "versions": [{
+        "version": "VERSION_HERE",
+        "status": "development",
+        "kicad_version": "10.0",
+        "download_sha256": "SHA256_HERE",
+        "download_size": DOWNLOAD_SIZE_HERE,
+        "download_url": "DOWNLOAD_URL_HERE",
+        "install_size": INSTALL_SIZE_HERE
+    }]
+}
