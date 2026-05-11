@@ -47,8 +47,8 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ./pcm/kicad-pcm-${{ steps.release-tag.outputs.tag }}.zip
-          asset_name: kicad-pcm-${{ steps.release-tag.outputs.tag }}.zip
+          file: ./pcm/ts-kicad-plugins-${{ steps.release-tag.outputs.tag }}.zip
+          asset_name: ts-kicad-plugins-${{ steps.release-tag.outputs.tag }}.zip
           overwrite: true
           tag: ${{ steps.release-tag.outputs.tag }}
 

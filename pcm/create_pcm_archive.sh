@@ -32,14 +32,14 @@ sed -i "/INSTALL_SIZE_HERE/d" pcm/archive/metadata.json
 
 echo "Zip PCM archive"
 cd pcm/archive
-zip -r ../kicad-pcm-"$VERSION".zip .
+zip -r ../ts-kicad-plugins-"$VERSION".zip .
 cd ../..
 
 echo "Gather data for repo rebuild"
 echo VERSION=$VERSION >> "$GITHUB_ENV"
-echo DOWNLOAD_SHA256=$(shasum --algorithm 256 pcm/kicad-pcm-"$VERSION".zip | xargs | cut -d' ' -f1) >> "$GITHUB_ENV"
-echo DOWNLOAD_SIZE=$(ls -l pcm/kicad-pcm-"$VERSION".zip | xargs | cut -d' ' -f5) >> "$GITHUB_ENV"
-echo DOWNLOAD_URL="https:\/\/github.com\/tecsmith\/ts-kicad-plugins\/releases\/download\/$VERSION\/kicad-pcm-$VERSION.zip" >> "$GITHUB_ENV"
-echo INSTALL_SIZE=$(unzip -l pcm/kicad-pcm-"$VERSION".zip | tail -1 | xargs | cut -d' ' -f1) >> "$GITHUB_ENV"
+echo DOWNLOAD_SHA256=$(shasum --algorithm 256 pcm/ts-kicad-plugins-"$VERSION".zip | xargs | cut -d' ' -f1) >> "$GITHUB_ENV"
+echo DOWNLOAD_SIZE=$(ls -l pcm/ts-kicad-plugins-"$VERSION".zip | xargs | cut -d' ' -f5) >> "$GITHUB_ENV"
+echo DOWNLOAD_URL="https:\/\/github.com\/tecsmith\/ts-kicad-plugins\/releases\/download\/$VERSION\/ts-kicad-plugins-$VERSION.zip" >> "$GITHUB_ENV"
+echo INSTALL_SIZE=$(unzip -l pcm/ts-kicad-plugins-"$VERSION".zip | tail -1 | xargs | cut -d' ' -f1) >> "$GITHUB_ENV"
 echo KICAD_VERSION=$(grep -oP '(?<="kicad_version": ")[^"]*' pcm/metadata.template.json) >> "$GITHUB_ENV"
 echo PROJECT_NAME=$(grep name pcm/metadata.template.json | head -1 | grep -oP '(?<="name": ")[^"]*') >> "$GITHUB_ENV"
