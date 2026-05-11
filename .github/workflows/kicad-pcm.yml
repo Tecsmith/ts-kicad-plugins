@@ -32,7 +32,7 @@ jobs:
           fi
 
           if [ -z "$tag" ]; then
-            tag="v0.0.0"
+            tag="0.0.0"
             upload_release=false
           fi
 
