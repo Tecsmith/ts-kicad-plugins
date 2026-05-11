@@ -1,7 +1,7 @@
 #!/bin/sh
 
 if [ -z "$1" ]; then
-  VERSION="test"
+  VERSION="v0.0.0"
 else
   VERSION="$1"
 fi

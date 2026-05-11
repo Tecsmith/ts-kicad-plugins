@@ -2,39 +2,59 @@ name: KiCAD PCM packaging
 
 on:  # yamllint disable-line rule:truthy
   release:
-    branches: [main]
     types:
       - published
   workflow_dispatch:
 
 jobs:
   create_archive:
+    if: github.event_name != 'release' || github.event.release.target_commitish == 'main'
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     runs-on: ubuntu-latest
     steps:
-      - name: Get latest tag
-        uses: oprypin/find-latest-tag@v1
-        with:
-          repository: tecsmith/ts-kicad-plugins
-          releases-only: true
-        id: latest-release
-
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Get latest tag
+        id: release-tag
+        shell: bash
+        run: |
+          upload_release=true
+
+          if [ "${{ github.event_name }}" = "release" ]; then
+            tag="${{ github.event.release.tag_name }}"
+          else
+            git fetch --force --tags
+            tag="$(git tag --sort=-v:refname | head -n 1)"
+          fi
+
+          if [ -z "$tag" ]; then
+            tag="v0.0.0"
+            upload_release=false
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "upload_release=$upload_release" >> "$GITHUB_OUTPUT"
 
       - name: Create archive
-        run: sh ./pcm/create_pcm_archive.sh ${{ steps.latest-release.outputs.tag }}
+        run: sh ./pcm/create_pcm_archive.sh ${{ steps.release-tag.outputs.tag }}
 
       - name: Upload zip as asset to release
-        uses: svenstaro/upload-release-action@v2
+        if: steps.release-tag.outputs.upload_release == 'true'
+        uses: svenstaro/upload-release-action@v2.11.15
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ./pcm/kicad-pcm-${{ steps.latest-release.outputs.tag }}.zip
-          asset_name: kicad-pcm-${{ steps.latest-release.outputs.tag }}.zip
+          file: ./pcm/kicad-pcm-${{ steps.release-tag.outputs.tag }}.zip
+          asset_name: kicad-pcm-${{ steps.release-tag.outputs.tag }}.zip
           overwrite: true
-          tag: ${{ steps.latest-release.outputs.tag }}
+          tag: ${{ steps.release-tag.outputs.tag }}
 
       - name: Trigger custom KiCAD repo rebuild
-        uses: benc-uk/workflow-dispatch@v1
+        if: steps.release-tag.outputs.upload_release == 'true'
+        uses: benc-uk/workflow-dispatch@v1.3.0
         with:
           workflow: Rebuild repository
           ref: refs/heads/main
