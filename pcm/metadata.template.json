@@ -5,8 +5,18 @@
     "description_full": "KiCAD plugins as used by Tecsmith projects.",
     "identifier": "com.github.tecsmith.ts-kicad-plugins",
     "type": "plugin",
-    "author": {},
-    "maintainer": {},
+    "author": {
+        "name": "Tecsmith",
+        "contact": {
+            "web": "https://github.com/Tecsmith"
+        }
+    },
+    "maintainer": {
+        "name": "Tecsmith",
+        "contact": {
+            "web": "https://github.com/Tecsmith"
+        }
+    },
     "license": "MIT",
     "resources": {
         "homepage": "https://github.com/Tecsmith/ts-kicad-plugins"
