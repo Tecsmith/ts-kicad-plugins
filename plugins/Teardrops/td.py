@@ -46,6 +46,12 @@ def _zone_set_priority(zone, p):
     except AttributeError:
         zone.SetAssignedPriority(p)
 
+# SHAPE_T_POLY was called S_POLYGON in KiCad 6.
+try:
+    _SHAPE_T_POLY = pcbnew.SHAPE_T_POLY
+except AttributeError:
+    _SHAPE_T_POLY = pcbnew.S_POLYGON
+
 __version__ = "0.5.1"
 
 ToUnits = ToMM
@@ -135,6 +141,27 @@ def __Zone(board, points, track):
     for p in points:
         ol.Append(p.x, p.y)
     return z
+
+
+def __Polygon(board, points, layer):
+    # ponytail: polygon teardrops carry no net code; DRC may flag copper on Cu layers
+    shape = pcbnew.PCB_SHAPE(board)
+    shape.SetShape(_SHAPE_T_POLY)
+    shape.SetLayer(layer)
+    shape.SetFilled(True)
+    shape.SetWidth(0)
+    poly = shape.GetPolyShape()
+    poly.NewOutline()
+    for p in points:
+        poly.Append(p.x, p.y)
+    return shape
+
+
+def __GetAllPolyTeardrops(board):
+    return [
+        item for item in board.GetDrawings()
+        if item.GetClass() == "PCB_SHAPE" and item.GetShape() == _SHAPE_T_POLY
+    ]
 
 
 def __Bezier(p1, p2, p3, p4, n=20.0):
@@ -344,10 +371,13 @@ def RebuildAllZones(pcb):
 
 
 def SetTeardrops(hpercent=50, vpercent=90, segs=10, pcb=None, use_smd=False,
-                 discard_in_same_zone=True, follow_tracks=True, noBulge=True):
+                 discard_in_same_zone=True, follow_tracks=True, noBulge=True,
+                 use_polygon=False, polygon_layer=None):
     """Set teardrops on a teardrop-free board; returns count of teardrops added."""
     if pcb is None:
         pcb = GetBoard()
+    if use_polygon and polygon_layer is None:
+        polygon_layer = pcbnew.F_Cu
 
     pad_types = [PAD_ATTRIB_PTH] + [PAD_ATTRIB_SMD]*use_smd
     vias = __GetAllVias(pcb)[0] + __GetAllPads(pcb, pad_types)[0]
@@ -367,7 +397,10 @@ def SetTeardrops(hpercent=50, vpercent=90, segs=10, pcb=None, use_smd=False,
                     trackLookup[layer][net] = []
                 trackLookup[layer][net].append(t)
 
-    teardrops = __GetAllTeardrops(pcb)
+    if use_polygon:
+        existing = __GetAllPolyTeardrops(pcb)
+    else:
+        teardrops = __GetAllTeardrops(pcb)
     count = 0
 
     for track in [t for t in pcb.GetTracks() if isinstance(t, PCB_TRACK)]:
@@ -377,12 +410,15 @@ def SetTeardrops(hpercent=50, vpercent=90, segs=10, pcb=None, use_smd=False,
             if int(track.IsPointOnEnds(via[0], int(via[1]/2))) == (STARTPOINT | ENDPOINT):
                 continue
 
-            found = False
-            if track.GetNetname() in teardrops:
-                for teardrop in teardrops[track.GetNetname()]:
-                    if __DoesTeardropBelongTo(teardrop, track, via):
-                        found = True
-                        break
+            if use_polygon:
+                found = any(__DoesTeardropBelongTo(td, track, via) for td in existing)
+            else:
+                found = False
+                if track.GetNetname() in teardrops:
+                    for teardrop in teardrops[track.GetNetname()]:
+                        if __DoesTeardropBelongTo(teardrop, track, via):
+                            found = True
+                            break
 
             if (via[3] != -1) and (via[3] != track.GetLayer()):
                 continue
@@ -395,24 +431,43 @@ def SetTeardrops(hpercent=50, vpercent=90, segs=10, pcb=None, use_smd=False,
                 coor = __ComputePoints(track, via, hpercent, vpercent, segs,
                                        follow_tracks, trackLookup, noBulge)
                 if coor:
-                    pcb.Add(__Zone(pcb, coor, track))
+                    if use_polygon:
+                        pcb.Add(__Polygon(pcb, coor, polygon_layer))
+                    else:
+                        pcb.Add(__Zone(pcb, coor, track))
                     count += 1
 
-    RebuildAllZones(pcb)
+    if not use_polygon:
+        RebuildAllZones(pcb)
     return count
 
 
-def RmTeardrops(pcb=None):
+def RmTeardrops(pcb=None, use_polygon=False, polygon_layer=None):
     """Remove all teardrops; returns count removed."""
     if pcb is None:
         pcb = GetBoard()
 
     count = 0
-    teardrops = __GetAllTeardrops(pcb)
-    for netname in teardrops:
-        for teardrop in teardrops[netname]:
-            pcb.Remove(teardrop)
+    if use_polygon:
+        all_vias = (__GetAllVias(pcb)[0] +
+                    __GetAllPads(pcb, [PAD_ATTRIB_PTH, PAD_ATTRIB_SMD])[0])
+        to_remove = []
+        for item in pcb.GetDrawings():
+            if item.GetClass() != "PCB_SHAPE" or item.GetShape() != _SHAPE_T_POLY:
+                continue
+            if polygon_layer is not None and item.GetLayer() != polygon_layer:
+                continue
+            if any(item.HitTest(via[0]) for via in all_vias):
+                to_remove.append(item)
+        for item in to_remove:
+            pcb.Remove(item)
             count += 1
+    else:
+        teardrops = __GetAllTeardrops(pcb)
+        for netname in teardrops:
+            for teardrop in teardrops[netname]:
+                pcb.Remove(teardrop)
+                count += 1
+        RebuildAllZones(pcb)
 
-    RebuildAllZones(pcb)
     return count
