@@ -4,3 +4,4 @@
 from . import RoundFillZone
 from . import RoundZoneRule
 from . import FabText
+from . import Teardrops
