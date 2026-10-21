@@ -182,7 +182,7 @@ def _bbox_edges(item):
 
 
 def _iter_board_items(board):
-    for getter_name in ("GetDrawings", "GetFootprints", "Tracks", "Zones"):
+    for getter_name in ("GetDrawings", "GetFootprints", "GetTracks", "Zones"):
         getter = getattr(board, getter_name, None)
         if getter is None:
             continue

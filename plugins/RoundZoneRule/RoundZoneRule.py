@@ -95,13 +95,6 @@ def _vector(x: int, y: int):
     return pcbnew.wxPoint(int(x), int(y))
 
 
-def _active_copper_layer(board) -> int:
-    layer = getattr(board, "GetActiveLayer", lambda: pcbnew.F_Cu)()
-    if getattr(board, "IsCopperLayer", lambda _layer: True)(layer):
-        return layer
-    return pcbnew.F_Cu
-
-
 def _grid_origin(board, frame=None):
     if frame is not None and hasattr(frame, "GetGridOrigin"):
         return _point_xy(frame.GetGridOrigin())
@@ -151,7 +144,7 @@ def _bbox_edges(item):
 
 
 def _iter_board_items(board):
-    for getter_name in ("GetDrawings", "GetFootprints", "Tracks", "Zones"):
+    for getter_name in ("GetDrawings", "GetFootprints", "GetTracks", "Zones"):
         getter = getattr(board, getter_name, None)
         if getter is None:
             continue
@@ -266,26 +259,30 @@ def _append_point(outline, outline_index: int, x: int, y: int) -> None:
 
 
 class RoundZoneRuleDialog(wx.Dialog):
-    def __init__(self, center_x: int, center_y: int, radius: int, unit: int, parent=None):
+    def __init__(self, center_x: int, center_y: int, radius: int, unit: int, layer_choices, parent=None):
         super().__init__(parent, title="Round Zone Rule")
 
         self.unit = unit
+        self.layer_ids = [layer for layer, _name in layer_choices]
         unit_label = _unit_label(unit)
 
         main_sizer = wx.BoxSizer(wx.VERTICAL)
-        grid = wx.FlexGridSizer(4, 2, 8, 8)
+        grid = wx.FlexGridSizer(5, 2, 8, 8)
         grid.AddGrowableCol(1, 1)
 
         self.x_ctrl = wx.TextCtrl(self, value=_format_user_value(center_x, unit))
         self.y_ctrl = wx.TextCtrl(self, value=_format_user_value(center_y, unit))
         self.radius_ctrl = wx.TextCtrl(self, value=_format_user_value(radius, unit))
         self.points_ctrl = wx.SpinCtrl(self, min=3, max=128, initial=64)
+        self.layer_ctrl = wx.Choice(self, choices=[name for _layer, name in layer_choices])
+        self.layer_ctrl.SetSelection(0)
 
         fields = (
             (f"Center X ({unit_label})", self.x_ctrl),
             (f"Center Y ({unit_label})", self.y_ctrl),
             (f"Radius ({unit_label})", self.radius_ctrl),
             ("Points", self.points_ctrl),
+            ("Layer", self.layer_ctrl),
         )
 
         for label, ctrl in fields:
@@ -301,9 +298,10 @@ class RoundZoneRuleDialog(wx.Dialog):
         y = _from_user_units(float(self.y_ctrl.GetValue()), self.unit)
         radius = _from_user_units(float(self.radius_ctrl.GetValue()), self.unit)
         points = self.points_ctrl.GetValue()
+        layer = self.layer_ids[self.layer_ctrl.GetSelection()]
         if radius <= 0:
             raise ValueError("Radius must be greater than zero.")
-        return x, y, radius, points
+        return x, y, radius, points, layer
 
 
 class RoundZoneRule(pcbnew.ActionPlugin):
@@ -330,6 +328,7 @@ class RoundZoneRule(pcbnew.ActionPlugin):
             *_default_center(board, frame),
             _default_radius(board) or _fallback_radius(unit),
             unit,
+            [(layer, str(board.GetLayerName(layer))) for layer in board.GetEnabledLayers().CuStack()],
             parent=frame,
         )
         try:
@@ -337,13 +336,13 @@ class RoundZoneRule(pcbnew.ActionPlugin):
                 return
 
             try:
-                center_x, center_y, radius, points = dialog.get_values()
+                center_x, center_y, radius, points, layer = dialog.get_values()
             except ValueError as exc:
                 wx.MessageBox(str(exc), "Round Zone Rule", wx.OK | wx.ICON_ERROR)
                 return
 
             zone = pcbnew.ZONE(board)
-            zone.SetLayer(_active_copper_layer(board))
+            zone.SetLayer(layer)
 
             if hasattr(zone, "SetIsRuleArea"):
                 zone.SetIsRuleArea(True)

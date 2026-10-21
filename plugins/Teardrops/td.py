@@ -58,6 +58,7 @@ ToUnits = ToMM
 FromUnits = FromMM
 
 MAGIC_TEARDROP_ZONE_ID = 0x4242
+TEARDROP_GROUP_NAME = "ts-kicad-plugins:Teardrops"
 
 
 def _angle_tenths(a) -> float:
@@ -73,12 +74,12 @@ def __GetAllVias(board):
     for item in board.GetTracks():
         if item.GetClass() == "PCB_VIA":
             pos = item.GetPosition()
-            width = item.GetWidth()
-            drill = PCB_VIA(item).GetDrillValue()
-            layer = -1
-            vias.append((pos, width, drill, layer))
-            if item.IsSelected():
-                vias_selected.append((pos, width, drill, layer))
+            drill = item.GetDrillValue()
+            for layer in item.GetLayerSet().CuStack():
+                width = item.GetWidth(layer)
+                vias.append((pos, width, drill, layer))
+                if item.IsSelected():
+                    vias_selected.append((pos, width, drill, layer))
     return vias, vias_selected
 
 
@@ -88,17 +89,11 @@ def __GetAllPads(board, filters=[]):
     for pad in board.GetPads():
         if pad.GetAttribute() in filters:
             pos = pad.GetPosition()
-            drill = min(pad.GetSize())
-            if pad.GetAttribute() == PAD_ATTRIB_SMD:
-                cu_stack = pad.GetLayerSet().CuStack()
-                if len(cu_stack) == 0:
-                    continue
-                layer = cu_stack[0]
-            else:
-                layer = -1
-            pads.append((pos, drill, 0, layer))
-            if pad.IsSelected():
-                pads_selected.append((pos, drill, 0, layer))
+            for layer in pad.GetLayerSet().CuStack():
+                diameter = min(pad.GetSize(layer))
+                pads.append((pos, diameter, 0, layer))
+                if pad.IsSelected():
+                    pads_selected.append((pos, diameter, 0, layer))
     return pads, pads_selected
 
 
@@ -154,6 +149,11 @@ def __Polygon(board, points, layer):
     poly.NewOutline()
     for p in points:
         poly.Append(p.x, p.y)
+    # A persistent group identifies generated polygons without matching user artwork.
+    group = pcbnew.PCB_GROUP(board)
+    group.SetName(TEARDROP_GROUP_NAME)
+    board.Add(group)
+    group.AddItem(shape)
     return shape
 
 
@@ -161,6 +161,8 @@ def __GetAllPolyTeardrops(board):
     return [
         item for item in board.GetDrawings()
         if item.GetClass() == "PCB_SHAPE" and item.GetShape() == _SHAPE_T_POLY
+        and item.GetParentGroup() is not None
+        and item.GetParentGroup().GetName() == TEARDROP_GROUP_NAME
     ]
 
 
@@ -380,31 +382,36 @@ def SetTeardrops(hpercent=50, vpercent=90, segs=10, pcb=None, use_smd=False,
         polygon_layer = pcbnew.F_Cu
 
     pad_types = [PAD_ATTRIB_PTH] + [PAD_ATTRIB_SMD]*use_smd
-    vias = __GetAllVias(pcb)[0] + __GetAllPads(pcb, pad_types)[0]
-    vias_selected = __GetAllVias(pcb)[1] + __GetAllPads(pcb, pad_types)[1]
+    vias, vias_selected = __GetAllVias(pcb)
+    pads, pads_selected = __GetAllPads(pcb, pad_types)
+    vias += pads
+    vias_selected += pads_selected
     if len(vias_selected) > 0:
         vias = vias_selected
 
+    tracks = [t for t in pcb.GetTracks()
+              if isinstance(t, PCB_TRACK) and not isinstance(t, PCB_VIA)]
     trackLookup = {}
     if follow_tracks:
-        for t in pcb.GetTracks():
-            if isinstance(t, PCB_TRACK):
-                net = t.GetNetname()
-                layer = t.GetLayer()
-                if layer not in trackLookup:
-                    trackLookup[layer] = {}
-                if net not in trackLookup[layer]:
-                    trackLookup[layer][net] = []
-                trackLookup[layer][net].append(t)
+        for t in tracks:
+            net = t.GetNetname()
+            layer = t.GetLayer()
+            if layer not in trackLookup:
+                trackLookup[layer] = {}
+            if net not in trackLookup[layer]:
+                trackLookup[layer][net] = []
+            trackLookup[layer][net].append(t)
 
     if use_polygon:
-        existing = __GetAllPolyTeardrops(pcb)
+        existing = [item for item in __GetAllPolyTeardrops(pcb)
+                    if item.GetLayer() == polygon_layer]
     else:
         teardrops = __GetAllTeardrops(pcb)
     count = 0
 
-    for track in [t for t in pcb.GetTracks() if isinstance(t, PCB_TRACK)]:
-        for via in [v for v in vias if track.IsPointOnEnds(v[0], int(v[1]/2))]:
+    for track in tracks:
+        for via in [v for v in vias if v[3] == track.GetLayer()
+                    and track.IsPointOnEnds(v[0], int(v[1]/2))]:
             if track.GetWidth() >= via[1] * vpercent / 100:
                 continue
             if int(track.IsPointOnEnds(via[0], int(via[1]/2))) == (STARTPOINT | ENDPOINT):
@@ -416,12 +423,9 @@ def SetTeardrops(hpercent=50, vpercent=90, segs=10, pcb=None, use_smd=False,
                 found = False
                 if track.GetNetname() in teardrops:
                     for teardrop in teardrops[track.GetNetname()]:
-                        if __DoesTeardropBelongTo(teardrop, track, via):
+                        if teardrop.IsOnLayer(track.GetLayer()) and __DoesTeardropBelongTo(teardrop, track, via):
                             found = True
                             break
-
-            if (via[3] != -1) and (via[3] != track.GetLayer()):
-                continue
 
             # ponytail: discard_in_same_zone can be slow on large boards (O(tracks*zones))
             if discard_in_same_zone and __IsViaAndTrackInSameNetZone(pcb, via, track):
@@ -449,18 +453,14 @@ def RmTeardrops(pcb=None, use_polygon=False, polygon_layer=None):
 
     count = 0
     if use_polygon:
-        all_vias = (__GetAllVias(pcb)[0] +
-                    __GetAllPads(pcb, [PAD_ATTRIB_PTH, PAD_ATTRIB_SMD])[0])
-        to_remove = []
-        for item in pcb.GetDrawings():
-            if item.GetClass() != "PCB_SHAPE" or item.GetShape() != _SHAPE_T_POLY:
-                continue
+        for item in __GetAllPolyTeardrops(pcb):
             if polygon_layer is not None and item.GetLayer() != polygon_layer:
                 continue
-            if any(item.HitTest(via[0]) for via in all_vias):
-                to_remove.append(item)
-        for item in to_remove:
+            group = pcbnew.Cast_to_BOARD_ITEM(item.GetParentGroup().AsEdaItem()).Cast()
+            group.RemoveItem(item)
             pcb.Remove(item)
+            if not group.GetItems():
+                pcb.Remove(group)
             count += 1
     else:
         teardrops = __GetAllTeardrops(pcb)

@@ -21,11 +21,13 @@ jobs:
       - name: Get latest tag
         id: release-tag
         shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           upload_release=true
 
-          if [ "${{ github.event_name }}" = "release" ]; then
-            tag="${{ github.event.release.tag_name }}"
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            tag="$RELEASE_TAG"
           else
             git fetch --force --tags
             tag="$(git tag --sort=-v:refname | head -n 1)"
@@ -40,7 +42,9 @@ jobs:
           echo "upload_release=$upload_release" >> "$GITHUB_OUTPUT"
 
       - name: Create archive
-        run: sh ./pcm/create_pcm_archive.sh ${{ steps.release-tag.outputs.tag }}
+        env:
+          RELEASE_TAG: ${{ steps.release-tag.outputs.tag }}
+        run: sh ./pcm/create_pcm_archive.sh "$RELEASE_TAG"
 
       - name: Upload zip as asset to release
         if: steps.release-tag.outputs.upload_release == 'true'

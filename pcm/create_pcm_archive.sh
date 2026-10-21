@@ -1,45 +1,44 @@
 #!/bin/sh
+set -eu
 
-if [ -z "$1" ]; then
-  VERSION="0.0.0"
-else
-  VERSION="$1"
-fi
+cd "$(dirname "$0")/.."
+python3 - "${1:-0.0.0}" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sys
+import zipfile
 
-echo "Clean up old files"
-rm -f pcm/*.zip
-rm -rf pcm/archive
+version = sys.argv[1]
+if not re.fullmatch(r"\d{1,4}(\.\d{1,4}(\.\d{1,6})?)?", version):
+    raise SystemExit("Use a numeric PCM version, for example 1.0.0.")
 
-echo "Create folder structure for ZIP"
-mkdir -p pcm/archive/resources
+metadata = json.loads(Path("pcm/metadata.template.json").read_text())
+metadata["versions"][0]["version"] = version
+archive = Path(f"pcm/ts-kicad-plugins-{version}.zip")
+with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as package:
+    for path in sorted(Path("plugins").rglob("*")):
+        if path.is_file() and "__pycache__" not in path.parts and path.suffix in {".py", ".png", ".svg"}:
+            package.write(path, path.as_posix())
+    package.write("resources/icon.png")
+    package.writestr("metadata.json", json.dumps(metadata, indent=2) + "\n")
+    install_size = sum(entry.file_size for entry in package.infolist())
 
-echo "Copy files to destination"
-# cp VERSION pcm/archive
-cp -r plugins pcm/archive
-cp resources/icon.png pcm/archive/resources/icon.png
-cp pcm/metadata.template.json pcm/archive/metadata.json
-
-echo "Write version info to file"
-echo "$VERSION" > pcm/archive/VERSION
-
-echo "Modify archive metadata.json"
-sed -i "s/VERSION_HERE/$VERSION/g" pcm/archive/metadata.json
-sed -i -E '/\"kicad_version\": \"[0-9]+\.[0-9]\",/ s/.$//g' pcm/archive/metadata.json
-sed -i "/SHA256_HERE/d" pcm/archive/metadata.json
-sed -i "/DOWNLOAD_SIZE_HERE/d" pcm/archive/metadata.json
-sed -i "/DOWNLOAD_URL_HERE/d" pcm/archive/metadata.json
-sed -i "/INSTALL_SIZE_HERE/d" pcm/archive/metadata.json
-
-echo "Zip PCM archive"
-cd pcm/archive
-zip -r ../ts-kicad-plugins-"$VERSION".zip .
-cd ../..
-
-echo "Gather data for repo rebuild"
-echo VERSION=$VERSION >> "$GITHUB_ENV"
-echo DOWNLOAD_SHA256=$(shasum --algorithm 256 pcm/ts-kicad-plugins-"$VERSION".zip | xargs | cut -d' ' -f1) >> "$GITHUB_ENV"
-echo DOWNLOAD_SIZE=$(ls -l pcm/ts-kicad-plugins-"$VERSION".zip | xargs | cut -d' ' -f5) >> "$GITHUB_ENV"
-echo DOWNLOAD_URL="https:\/\/github.com\/tecsmith\/ts-kicad-plugins\/releases\/download\/$VERSION\/ts-kicad-plugins-$VERSION.zip" >> "$GITHUB_ENV"
-echo INSTALL_SIZE=$(unzip -l pcm/ts-kicad-plugins-"$VERSION".zip | tail -1 | xargs | cut -d' ' -f1) >> "$GITHUB_ENV"
-echo KICAD_VERSION=$(grep -oP '(?<="kicad_version": ")[^"]*' pcm/metadata.template.json) >> "$GITHUB_ENV"
-echo PROJECT_NAME=$(grep name pcm/metadata.template.json | head -1 | grep -oP '(?<="name": ")[^"]*') >> "$GITHUB_ENV"
+values = {
+    "VERSION": version,
+    "DOWNLOAD_SHA256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+    "DOWNLOAD_SIZE": archive.stat().st_size,
+    "DOWNLOAD_URL": f"https://github.com/tecsmith/ts-kicad-plugins/releases/download/{version}/{archive.name}",
+    "INSTALL_SIZE": install_size,
+    "KICAD_VERSION": metadata["versions"][0]["kicad_version"],
+    "PROJECT_NAME": metadata["name"],
+}
+output = "".join(f"{key}={value}\n" for key, value in values.items())
+if os.environ.get("GITHUB_ENV"):
+    with open(os.environ["GITHUB_ENV"], "a") as env:
+        env.write(output)
+print(f"Created {archive}")
+print(output, end="")
+PY

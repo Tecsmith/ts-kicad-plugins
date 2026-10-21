@@ -108,22 +108,11 @@ def _is_text_item(item) -> bool:
 
 def _iter_fab_texts(board):
     for fp in board.GetFootprints():
-        for getter_name in ("Reference", "Value"):
-            getter = getattr(fp, getter_name, None)
-            if getter is None:
-                continue
+        for getter in (fp.GetFields, fp.GraphicalItems):
             try:
-                text = getter()
-                if _is_text_item(text) and text.GetLayer() in FAB_LAYERS:
-                    yield text
-            except Exception:
-                pass
-
-        if hasattr(fp, "GraphicalItems"):
-            try:
-                for item in fp.GraphicalItems():
-                    if _is_text_item(item) and item.GetLayer() in FAB_LAYERS:
-                        yield item
+                for text in getter():
+                    if _is_text_item(text) and text.GetLayer() in FAB_LAYERS:
+                        yield text
             except Exception:
                 pass
 
@@ -155,6 +144,8 @@ def _set_text_thickness(text, thickness: int, auto: bool) -> None:
 
 def _local_offset(text) -> tuple[int, int] | None:
     """Return the text's offset in footprint-local coordinates."""
+    if hasattr(text, "GetFPRelativePosition"):
+        return _point_xy(text.GetFPRelativePosition())
     # FP_TEXT (KiCad 6 / Reference / Value) stores an explicit local offset
     if hasattr(text, "GetOffset"):
         try:
@@ -175,6 +166,9 @@ def _local_offset(text) -> tuple[int, int] | None:
 
 def _set_local_offset(text, ox: int, oy: int) -> None:
     """Set the text's offset in footprint-local coordinates."""
+    if hasattr(text, "SetFPRelativePosition"):
+        text.SetFPRelativePosition(_vector(ox, oy))
+        return
     if hasattr(text, "SetOffset"):
         try:
             text.SetOffset(_vector(ox, oy))
@@ -200,7 +194,11 @@ def _text_angle_deg(text) -> float:
         try:
             angle = method()
             if hasattr(angle, "AsDegrees"):
-                return float(angle.AsDegrees()) % 360.0
+                degrees = float(angle.AsDegrees())
+                parent = text.GetParentFootprint()
+                if parent is not None:
+                    degrees -= parent.GetOrientation().AsDegrees()
+                return degrees % 360.0
             # KiCad 6: raw decidegrees
             return (float(angle) / 10.0) % 360.0
         except Exception:
@@ -327,7 +325,7 @@ class FabTextDialog(wx.Dialog):
         _save_config({
             "width_mm": float(pcbnew.ToMM(width)),
             "height_mm": float(pcbnew.ToMM(height)),
-            "thickness_mm": float(pcbnew.ToMM(thickness)) if not auto else float(self.thickness_ctrl.GetValue()),
+            "thickness_mm": float(pcbnew.ToMM(_from_user_units(float(self.thickness_ctrl.GetValue()), self.unit))),
             "auto_thickness": auto,
             "decenter": decenter,
         })
